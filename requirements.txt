@@ -1,0 +1,4 @@
+google-ads-admanager
+pandas
+streamlit
+plotly
