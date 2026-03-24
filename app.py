@@ -6,7 +6,8 @@ import tempfile
 import os
 import json
 
-# --- 1. YOUR DEMO CREDENTIALS (EMBEDDED) ---
+# --- CONFIGURATION ---
+NETWORK_CODE = '23327488191'
 KEY_DATA = {
   "type": "service_account",
   "project_id": "prime-ads-hub",
@@ -15,17 +16,17 @@ KEY_DATA = {
   "client_email": "prime-ads-hub@prime-ads-hub.iam.gserviceaccount.com",
 }
 
-# !!! CHANGE THIS TO YOUR NETWORK CODE !!!
-NETWORK_CODE = '23327488191' 
+st.set_page_config(page_title="Prime Ads Hub | Dashboard", layout="wide")
 
-# --- 2. THE DATA FETCHING ENGINE ---
-def fetch_data_from_gam():
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_key:
-        json.dump(KEY_DATA, temp_key)
-        temp_key_path = temp_key.name
+# --- DATA FETCHING ---
+@st.cache_data(ttl=10800)  # Auto-refresh every 3 hours
+def get_gam_data():
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as tmp:
+        json.dump(KEY_DATA, tmp)
+        tmp_path = tmp.name
 
     try:
-        client = ad_manager.AdManagerClient.LoadFromStorage(temp_key_path)
+        client = ad_manager.AdManagerClient.LoadFromStorage(tmp_path)
         client.network_code = NETWORK_CODE
         report_downloader = client.GetDataService('ReportService', version='v202408')
 
@@ -36,51 +37,46 @@ def fetch_data_from_gam():
                 'dateRangeType': 'LAST_7_DAYS',
             }
         }
-
+        
         report_job = report_downloader.runReportJob(report_job)
         report_file = tempfile.NamedTemporaryFile(suffix='.csv.gz', delete=False)
         report_downloader.downloadReport(report_job['id'], 'CSV_DUMP', report_file)
         report_file.close()
 
         df = pd.read_csv(report_file.name, compression='gzip')
-        # Cleanup
         df['Revenue'] = df['Column.AD_SERVER_CPM_AND_CPC_REVENUE'] / 1000000
         return df
     finally:
-        if os.path.exists(temp_key_path):
-            os.remove(temp_key_path)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
-# --- 3. STREAMLIT DASHBOARD UI ---
-st.set_page_config(page_title="Prime Ads Hub", layout="wide")
-st.title("🚀 Prime Ads Hub Advanced Reporting")
-
-if st.button('🔄 Force Refresh Data'):
+# --- UI DESIGN ---
+st.title("🚀 Prime Ads Hub Reporting Hub")
+st.sidebar.header("Settings")
+if st.sidebar.button("Force Update Now"):
     st.cache_data.clear()
     st.rerun()
 
-@st.cache_data(ttl=10800) # Auto-refresh every 3 hours (10800 seconds)
-def get_cached_data():
-    return fetch_data_from_gam()
-
 try:
-    with st.spinner('Fetching fresh data from Google Ad Manager...'):
-        df = get_cached_data()
+    with st.spinner('Accessing Google Ad Manager...'):
+        data = get_gam_data()
 
     # Dashboard Metrics
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Revenue", f"${df['Revenue'].sum():,.2f}")
-    col2.metric("Total Impressions", f"{df['Column.AD_SERVER_IMPRESSIONS'].sum():,}")
-    col3.metric("Avg CTR", f"{(df['Column.AD_SERVER_CLICKS'].sum()/df['Column.AD_SERVER_IMPRESSIONS'].sum()*100):,.2f}%")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Revenue", f"${data['Revenue'].sum():,.2f}")
+    m2.metric("Total Impressions", f"{data['Column.AD_SERVER_IMPRESSIONS'].sum():,}")
+    m3.metric("Avg CTR", f"{(data['Column.AD_SERVER_CLICKS'].sum()/data['Column.AD_SERVER_IMPRESSIONS'].sum()*100):,.2f}%")
 
     # Chart
-    st.subheader("Revenue by Date")
-    fig = px.area(df, x='Dimension.DATE', y='Revenue', color='Dimension.AD_UNIT_NAME', template="plotly_dark")
+    st.subheader("Revenue Trend")
+    fig = px.area(data, x='Dimension.DATE', y='Revenue', color='Dimension.AD_UNIT_NAME', template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
     # Table
-    st.subheader("Raw Report")
-    st.dataframe(df, use_container_width=True)
+    st.subheader("Detailed Report")
+    st.dataframe(data, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Error connecting to GAM: {e}")
-    st.info("Make sure you added the Network Code and that the Service Account has 'Administrator' access in GAM.")
+    st.error("⚠️ Connection Error")
+    st.write(f"**Details:** {e}")
+    st.info("Please ensure the Service Account email is added as a USER in your GAM settings.")
