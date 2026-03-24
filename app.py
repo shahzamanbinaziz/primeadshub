@@ -1,72 +1,86 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+from googleads import ad_manager
+import tempfile
+import os
+import json
 
-# --- CONFIG ---
-st.set_page_config(page_title="Prime Ads Hub | Analytics", layout="wide", page_icon="📈")
+# --- 1. YOUR DEMO CREDENTIALS (EMBEDDED) ---
+KEY_DATA = {
+  "type": "service_account",
+  "project_id": "prime-ads-hub",
+  "private_key_id": "e9ea45e55a74cc1e56f91ed0d0e11961e20d7682",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC6CU7PPyKw5elT\nhbzUUYzw4FUjnY9yWtQ7GBADIlHI9nlXBxQUh9WctzlbH5NmfOF0grk5mnQqD87B\ne/8OPto7vESUL7c4PdOLE94LzddHszppI2fybx5Glk7olW4+0/5hd3A/wx8hr0D7\ndCxWV1kfofvgm+fGqCdtSBteeTL4cCKIBArHW07FZVbU7xR+SipbEkldZF/X09ol\nc9SAwyxO7uLwVGdQAIxGfT1DZ2IrkVNUJofCCTZqc/YY1dQgdewu4QUXEUXZwVv9\nQ++2TL4rkp24ygiPCChRAaDgM4fxmWIu0L13QNms6HVucqpeBkRUVRx/cqt0GKUm\nCjFDQNxdAgMBAAECggEAFuT22Svup8D/lCsI+EMZ+nnNGH83LE5PwH7/V3dlg7sL\nZ0Gkf7tQt0LYMOXjpLD5KPa+dz+SDKwZ2HdbReRHxKKweOEfZfE746l8Ac1g8T62\nEULNc8kne23bg6WCJgK+Uz3Y50vqvKE9+MQNAcopmmo7nmJpZWoDwh/l2FxHgMnM\nErO8Cn5vaIQKGmYX+zNTkeGZKTndhll8ZN5iyD1BD3nIyMWqQhYqKeBYBTOO3XXf\nMdf+OkrjeLRQpZQwdq1wWyAQlNz7hFLl4n7TgBDjFmGCTrfRlBXt0EJI2pLlRiI/\n2xbPLGkT7XEVoeuxkwIW16K9hhRhEZ0OCKYXbw7cAQKBgQDu9bmn0VwqTciRnpkt\n2ypxrUiT7zuMxCdDg/7x3z064HqRTHLkmen8/3bG5ebxwd1SUkiZpzjqWUNP12Qh\n9ITLotzENgMOWX3yPRDVRkO5+uYwVcVLcuzPcajxglX8pWVa+j472EPvKE5UY/Ca\n01UnQOQkbE3c8ZjDYWLwFi54XQKBgQDHTXNA4zToNVKejbRj3MehmLLUeIOgvI9z\nRIylioynnj7bzrOGUmA5DSk0z3tHcUYYbOZg/52jS/Uhsz/IH/Z1ZZatMqz/YYZX\nLXxKXLltuIfGtP5tvoKOfDMv8ENsDDBIdE+mtiSfFaiXvJzp8imlsst/YIIEhoLI\nE0GX1yW0AQKBgDzdoCVrwVMRLvZQdGnmuj/sSGFN/VgUmn+q/mQzXZBCn1WlKFqs\ DZqgo2t0IcgQfkQ6qz1gB7JBfFC450ty0eRgnmTn8Q1VpCvwe/onBJc5nipPnopi\nQolwRP0HGsnYgyGSPgnWQy+Gj7UVI7L8A2OVNsdEQuz1KNkTVDUdIUcNAoGALmXI\ndA2w7nIjdsf0e98VFnivASnBMvVSy/nkaFF15zu+1HstbhLVVdLLigDXaU1kjSEl\nDOXVNAPl4F+TdKqEPNZWmqGWhqmUlc0AB2vIu1NfQJI4PSJB0Jv3aqybdZbs0qFJ\nPb1fjy2CnziIqyn2Kh4So+e6vQT3g06AUbIDlAECgYEA1uExESpqYjifKW4ZKfCa\nm3RYDs0FNITiC/tU+i3m+4pCtbjKqcb4HimivEUPdx2Eh8xZlOQ+nWNEQkg72yiH\n5nksFlo3xaLQwNk+7wmvxufZAPt32Y75eju6MlteOwYGXPibFzqUusHyYQ3kRycV\nwX8a+qHII56+6MGt4y1HV0s=\n-----END PRIVATE KEY-----\n",
+  "client_email": "prime-ads-hub@prime-ads-hub.iam.gserviceaccount.com",
+}
 
-# Branding CSS
-st.markdown("""
-    <style>
-    .main { background-color: #0E1117; color: white; }
-    div[data-testid="stMetricValue"] { color: #00FFAA; font-size: 32px; }
-    .stSidebar { background-color: #161B22; }
-    </style>
-    """, unsafe_allow_html=True)
+# !!! CHANGE THIS TO YOUR NETWORK CODE !!!
+NETWORK_CODE = '23327488191' 
 
-# --- DATA LOADING ---
-@st.cache_data(ttl=3600)
-def load_data():
+# --- 2. THE DATA FETCHING ENGINE ---
+def fetch_data_from_gam():
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as temp_key:
+        json.dump(KEY_DATA, temp_key)
+        temp_key_path = temp_key.name
+
     try:
-        data = pd.read_csv('gam_report_data.csv')
-        data['Dimension.DATE'] = pd.to_datetime(data['Dimension.DATE'])
-        return data
-    except:
-        return None
+        client = ad_manager.AdManagerClient.LoadFromStorage(temp_key_path)
+        client.network_code = NETWORK_CODE
+        report_downloader = client.GetDataService('ReportService', version='v202408')
 
-df = load_data()
+        report_job = {
+            'reportQuery': {
+                'dimensions': ['DATE', 'AD_UNIT_NAME'],
+                'columns': ['AD_SERVER_IMPRESSIONS', 'AD_SERVER_CLICKS', 'AD_SERVER_CPM_AND_CPC_REVENUE'],
+                'dateRangeType': 'LAST_7_DAYS',
+            }
+        }
 
-# --- SIDEBAR & BRANDING ---
-st.sidebar.image("https://via.placeholder.com/150x50?text=PRIME+ADS+HUB", use_column_width=True) # Replace with your logo URL
-st.sidebar.title("Reporting Filters")
+        report_job = report_downloader.runReportJob(report_job)
+        report_file = tempfile.NamedTemporaryFile(suffix='.csv.gz', delete=False)
+        report_downloader.downloadReport(report_job['id'], 'CSV_DUMP', report_file)
+        report_file.close()
 
-if df is not None:
-    # Filters
-    ad_units = st.sidebar.multiselect("Select Ad Units", options=df['Dimension.AD_UNIT_NAME'].unique(), default=df['Dimension.AD_UNIT_NAME'].unique())
-    countries = st.sidebar.multiselect("Select Countries", options=df['Dimension.COUNTRY_NAME'].unique(), default=df['Dimension.COUNTRY_NAME'].unique()[:5])
-    
-    filtered_df = df[(df['Dimension.AD_UNIT_NAME'].isin(ad_units)) & (df['Dimension.COUNTRY_NAME'].isin(countries))]
+        df = pd.read_csv(report_file.name, compression='gzip')
+        # Cleanup
+        df['Revenue'] = df['Column.AD_SERVER_CPM_AND_CPC_REVENUE'] / 1000000
+        return df
+    finally:
+        if os.path.exists(temp_key_path):
+            os.remove(temp_key_path)
 
-    # --- MAIN UI ---
-    st.title("📊 Prime Ads Hub Command Center")
-    st.markdown("---")
+# --- 3. STREAMLIT DASHBOARD UI ---
+st.set_page_config(page_title="Prime Ads Hub", layout="wide")
+st.title("🚀 Prime Ads Hub Advanced Reporting")
 
-    # Metrics Row
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total Revenue", f"${filtered_df['Revenue'].sum():,.2f}")
-    m2.metric("Impressions", f"{filtered_df['Column.AD_SERVER_IMPRESSIONS'].sum():,}")
-    m3.metric("Global eCPM", f"${filtered_df['eCPM'].mean():,.2f}")
-    m4.metric("CTR", f"{(filtered_df['Column.AD_SERVER_CLICKS'].sum()/filtered_df['Column.AD_SERVER_IMPRESSIONS'].sum()*100):,.2f}%")
+if st.button('🔄 Force Refresh Data'):
+    st.cache_data.clear()
+    st.rerun()
 
-    # Charts Row
-    c1, c2 = st.columns([2, 1])
+@st.cache_data(ttl=10800) # Auto-refresh every 3 hours (10800 seconds)
+def get_cached_data():
+    return fetch_data_from_gam()
 
-    with c1:
-        st.subheader("Revenue Trend (Last 30 Days)")
-        fig_rev = px.line(filtered_df.groupby('Dimension.DATE')['Revenue'].sum().reset_index(), 
-                          x='Dimension.DATE', y='Revenue', template="plotly_dark", color_discrete_sequence=['#00FFAA'])
-        st.plotly_chart(fig_rev, use_container_width=True)
+try:
+    with st.spinner('Fetching fresh data from Google Ad Manager...'):
+        df = get_cached_data()
 
-    with c2:
-        st.subheader("Revenue by Ad Unit")
-        fig_pie = px.pie(filtered_df, values='Revenue', names='Dimension.AD_UNIT_NAME', hole=0.4, template="plotly_dark")
-        st.plotly_chart(fig_pie, use_container_width=True)
+    # Dashboard Metrics
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Revenue", f"${df['Revenue'].sum():,.2f}")
+    col2.metric("Total Impressions", f"{df['Column.AD_SERVER_IMPRESSIONS'].sum():,}")
+    col3.metric("Avg CTR", f"{(df['Column.AD_SERVER_CLICKS'].sum()/df['Column.AD_SERVER_IMPRESSIONS'].sum()*100):,.2f}%")
 
-    # Geographic Breakdown
-    st.subheader("Performance by Country")
-    geo_df = filtered_df.groupby('Dimension.COUNTRY_NAME')[['Revenue', 'Column.AD_SERVER_IMPRESSIONS']].sum().sort_values('Revenue', ascending=False)
-    st.dataframe(geo_df, use_container_width=True)
+    # Chart
+    st.subheader("Revenue by Date")
+    fig = px.area(df, x='Dimension.DATE', y='Revenue', color='Dimension.AD_UNIT_NAME', template="plotly_dark")
+    st.plotly_chart(fig, use_container_width=True)
 
-else:
-    st.warning("⚠️ No data found. Please ensure the 'fetch_gam_data.py' script has run successfully.")
+    # Table
+    st.subheader("Raw Report")
+    st.dataframe(df, use_container_width=True)
+
+except Exception as e:
+    st.error(f"Error connecting to GAM: {e}")
+    st.info("Make sure you added the Network Code and that the Service Account has 'Administrator' access in GAM.")
